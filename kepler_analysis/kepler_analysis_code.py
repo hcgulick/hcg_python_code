@@ -6,6 +6,7 @@ import math
 import astropy.io.fits as pyfits
 import pandas as pd
 from astropy.wcs import WCS
+from scipy import signal
 
 from astroquery.mast import Mast
 from astroquery.mast import Observations
@@ -208,19 +209,83 @@ def sum_flux(img_set, plot = 'no', savefig_filename = 'no', add_back = 'no'):
     
     return time, flux_sum
     
+
+def calc_flux_over_area(ind, sum_area, data_all):
+    
+    time, flux, flux_err, back_flux = filter_nan(data_all[ind])
+    
+    #finding middle coord of first image
+    half_row_len = int(len(flux[0])/2)
+    half_col_len = int(len(flux[0][0])/2)
+
+    summed_pupil_fluxes = []
+    for i in range(len(flux)):
+        img_flux = flux[i]
+        
+        row_fluxes = img_flux[int(half_row_len-sum_area/2):int(half_row_len+sum_area/2)]
+        pupil = row_fluxes.T[int(half_col_len-sum_area/2):int(half_col_len+sum_area/2)]
+        summed_pupil_fluxes.append(np.sum(pupil))
+        #print('percent done:', i/len(flux))
+    
+    return summed_pupil_fluxes
+    
+def calc_sample_frequency(ind, data_all):
+    
+    time, flux, flux_err, back_flux = filter_nan(data_all[ind])
+    
+    time_steps = []
+    for i in range(len(time)-1):
+        time_steps.append(time[i+1]-time[i])
+    
+    frequency = 1/np.median(time_steps)
+    
+    return frequency
+
+def make_periodogram(start_ind, file_num, sum_area, data_all, filenames_all, savefig = 'no'):
+
+    f_all = []
+    Pxx_den_all = []
+    fnames = []
+
+    ind = start_ind
+    for i in range(start_ind, start_ind+file_num):
+        print(ind)
+        #calculating light curves over pupil area
+        lc = calc_flux_over_area(ind, sum_area, data_all)
+        #calculating observation frequency
+        freq = calc_sample_frequency(ind, data_all)
+        #calculating periodogram signal
+        f, Pxx_den = signal.periodogram(lc, freq)
+        f_all.append(f)
+        fnames.append(filenames_all[ind])
+        Pxx_den_all.append(Pxx_den)
+        ind += int(len(data_all)/3)
+        
+        
+    
+    fig, axs = plt.subplots(1, file_num, figsize = (13,3))
+    
+    axs_all = []
+    for i in range(file_num):
+        a = axs[i].plot(f_all[i], Pxx_den_all[i], color = 'black', linewidth = 1)
+        axs[i].set_title(fnames[i][:-9])
+        axs[i].set_xlabel('frequency [Hz]')
+        axs_all.append(a)
+        
+    axs[0].set_ylabel('PSD [V**2/Hz]')
+    plt.show()
+
+
+
+
+######### execute codes
+
+
 def execute_lc(filename, row_ind, col_ind, num_im = 1):
     
     data, hdr = open_file(filename)
     plot_image(data, num_im, hdr)
     plot_light_curve(data, row_ind, col_ind)
-    
-
-'''def execute_img_sum(filename, plot = 'no', savefig_filename = 'no'):
-    
-    data, hdr = open_file(filename)
-    time, fsum = sum_flux(data, plot, savefig_filename)
-    
-    return time, fsum'''
     
 def execute_img_sum(filename, add_back = 'no', plot = 'no', savefig_filename = 'no'):
     
@@ -233,7 +298,5 @@ def execute_all(filename, row_ind, col_ind, num_im = 1, plot = 'no'):
     
     execute_lc(filename, row_ind, col_ind, num_im = 1)
     execute_img_sum(filename, plot)
-    
-
 
 
